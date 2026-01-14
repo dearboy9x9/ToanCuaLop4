@@ -3,3 +3,5 @@ groq
 pandas
 Pillow
 gTTS
+matplotlib
+numpy
