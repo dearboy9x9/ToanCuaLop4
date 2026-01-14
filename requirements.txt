@@ -5,4 +5,5 @@ Pillow
 edge-tts
 matplotlib
 numpy
+streamlit-mic-recorder
 
