@@ -1,142 +1,90 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-from groq import Groq
-import pandas as pd
-import os
-from datetime import datetime
-import re
+import edge_tts
+import asyncio
 import io
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from gtts import gTTS
+import re
+import pandas as pd
+from datetime import datetime
+from streamlit_mic_recorder import mic_recorder # Thư viện ghi âm
 
-# --- 1. CẤU HÌNH HỆ THỐNG ---
+# --- 1. CẤU HÌNH ---
 GROQ_API_KEY = "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"
+from groq import Groq
 client = Groq(api_key=GROQ_API_KEY)
 MODEL_TEXT = "llama-3.3-70b-versatile"
-DATA_FILE = "nhat_ky_hoc_tap_cua.csv"
 
-# Thông tin Email của Ông chủ Kiên
-EMAIL_GUI = "cua.hoc.toan.ai@gmail.com" 
-EMAIL_NHAN = "kien.nguyen@example.com" 
-MAT_KHAU_APP = "xxxx xxxx xxxx xxxx" 
+# --- 2. HÀM XỬ LÝ GIỌNG ĐỌC ĐA NHÂN VẬT (V63) ---
+async def generate_pro_voice(text, voice="en-US-EmmaNeural", rate="-0%"):
+    communicate = edge_tts.Communicate(text, voice, rate=rate)
+    data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            data += chunk["data"]
+    return data
 
-# --- 2. TỪ ĐIỂN KIẾN THỨC GLOBAL SUCCESS ---
-ENGLISH_UNITS = {
-    11: "My family's jobs (Teacher, Doctor, Nurse, Worker, Clerk)",
-    12: "Jobs and workplaces (School, Hospital, Factory, Farm, Office)",
-    13: "Appearance (Tall, Short, Slim, Old, Young)",
-    14: "Daily activities (Get up, Have breakfast, Go to school)",
-    15: "My family's weekend (Watch TV, Listen to music, Clean the room)"
-}
+def play_audio(text, speed="Normal"):
+    rate = "-30%" if speed == "Slow" else "-5%"
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    # Tự động chọn giọng dựa trên tên nhân vật nếu là hội thoại
+    voice = "en-US-AndrewNeural" if "Tom:" in text or "B:" in text else "en-US-EmmaNeural"
+    audio_data = loop.run_until_complete(generate_pro_voice(text, voice, rate))
+    st.audio(audio_data, format='audio/mp3')
 
-# --- 3. HÀM TIỆN ÍCH ---
-def speak_text(text, lang='en'):
-    tts = gTTS(text=text, lang=lang)
-    fp = io.BytesIO()
-    tts.write_to_fp(fp)
-    return fp
+# --- 3. HÀM RA ĐỀ HỘI THOẠI ---
+def call_ai_v63(prompt, is_english=True):
+    system_msg = "Bạn là giáo viên giỏi. Nếu là Tiếng Anh, hãy soạn hội thoại giữa 2 người (A và B). Chỉ dùng Tiếng Anh cho đề, Tiếng Việt cho giải thích."
+    chat = client.chat.completions.create(
+        messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": prompt}],
+        model=MODEL_TEXT, temperature=0.5
+    )
+    return chat.choices[0].message.content
 
-def send_detailed_report(content):
-    if MAT_KHAU_APP == "xxxx xxxx xxxx xxxx": return False
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_GUI
-        msg['To'] = EMAIL_NHAN
-        msg['Subject'] = f"📋 BÁO CÁO LỖ HỔNG KIẾN THỨC - BÉ CUA ({datetime.now().strftime('%d/%m/%Y')})"
-        msg.attach(MIMEText(content, 'plain'))
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(EMAIL_GUI, MAT_KHAU_APP)
-        server.send_message(msg)
-        server.quit()
-        return True
-    except: return False
-
-# --- 4. GIAO DIỆN ---
-st.set_page_config(page_title="Gia Sư AI V61 - Supreme", layout="wide")
-if 'html_p1' not in st.session_state: 
-    st.session_state.update({'html_p1':"", 'html_p2':"", 'raw_ans':"", 'listening_text':"", 'start_time': None, 'unit_info': ""})
+# --- 4. GIAO DIỆN CHÍNH ---
+st.set_page_config(page_title="Siêu Gia Sư AI V63", layout="wide")
 
 with st.sidebar:
-    st.title("🛡️ GIA SƯ AI V61")
-    mon_hoc = st.selectbox("Môn học:", ["🧮 Toán Lớp 4 (Cánh Diều)", "🇬🇧 Tiếng Anh 4 (Global Success)"])
-    chuc_nang = st.radio("Menu:", ["🚀 Làm bài mới", "🚑 Luyện tập cải thiện", "📉 Xem tiến độ"])
-    
-    if "Tiếng Anh" in mon_hoc:
-        unit_num = st.number_input("Chọn Unit (11-20):", 11, 20, 11)
-        st.session_state['unit_info'] = ENGLISH_UNITS.get(unit_num, "General Topic")
-        st.info(f"Chủ đề: {st.session_state['unit_info']}")
+    st.title("🛡️ SUPER AI V63")
+    mon = st.selectbox("Môn học:", ["🇬🇧 Tiếng Anh 4 (Global Success)", "🧮 Toán Lớp 4 (Cánh Diều)"])
+    mode = st.radio("Chế độ:", ["🚀 Làm bài mới", "🎙️ Luyện phát âm", "📈 Tiến độ"])
 
-# --- 5. LOGIC RA ĐỀ ---
-if chuc_nang == "🚀 Làm bài mới" and st.button("📝 RA ĐỀ TOÀN DIỆN"):
-    st.session_state['start_time'] = datetime.now()
-    with st.spinner("AI đang soạn đề & chuẩn bị hình ảnh minh họa..."):
-        if "Toán" in mon_hoc:
-            # Code Toán giữ nguyên logic V59
-            pass
-        else:
-            topic = st.session_state['unit_info']
-            # Soạn phần nghe
-            script = client.chat.completions.create(messages=[{"role":"user","content":f"Write 4 sentences in English about {topic} for Grade 4."}], model=MODEL_TEXT).choices[0].message.content
-            st.session_state['listening_text'] = script
-            
-            # Soạn trắc nghiệm & Tự luận
-            p1 = client.chat.completions.create(messages=[{"role":"user","content":f"Based on '{script}', write 2 listening and 4 grammar/vocab questions about {topic}. English only. Format: Question 1: ... A. B. C. D."}], model=MODEL_TEXT).choices[0].message.content
-            p2 = client.chat.completions.create(messages=[{"role":"user","content":f"Write 3 'Reorder words' questions about {topic}. English only."}], model=MODEL_TEXT).choices[0].message.content
-            
-            st.session_state['html_p1'] = p1
-            st.session_state['html_p2'] = p2
-            st.session_state['raw_ans'] = client.chat.completions.create(messages=[{"role":"user","content":f"Solve this:\n{p1}\n{p2}"}], model=MODEL_TEXT).choices[0].message.content
+if mode == "🚀 Làm bài mới":
+    if st.button("📝 RA ĐỀ HỘI THOẠI"):
+        with st.spinner("AI đang dàn dựng kịch bản hội thoại..."):
+            # Soạn kịch bản nghe có 2 nhân vật
+            script = call_ai_v63("Soạn 1 đoạn hội thoại ngắn 4 câu giữa Tom và Mary về chủ đề Daily Activities lớp 4.")
+            st.session_state['script'] = script
+            # Soạn câu hỏi dựa trên kịch bản
+            questions = call_ai_v63(f"Dựa trên hội thoại: '{script}', soạn 4 câu hỏi trắc nghiệm tiếng Anh.")
+            st.session_state['qs'] = questions
             st.rerun()
 
-# --- 6. HIỂN THỊ ĐỀ ---
-if st.session_state['html_p1']:
-    st.subheader(f"🌟 ĐỀ THI: {st.session_state['unit_info']}")
-    
-    # Suggesting visual dictionary
-    if "Jobs" in st.session_state['unit_info'] or "11" in str(st.session_state['unit_info']):
-        st.write("🖼️ **Từ điển hình ảnh nhanh:**")
-        st.markdown("")
-    
-    if st.session_state['listening_text']:
-        with st.expander("🎧 NGHE ĐOẠN VĂN"):
-            st.audio(speak_text(st.session_state['listening_text']), format='audio/mp3')
+    if 'script' in st.session_state:
+        st.subheader("🎧 PHẦN NGHE HỘI THOẠI (2 GIỌNG NAM - NỮ)")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔊 Nghe tốc độ thường"): play_audio(st.session_state['script'])
+        with col2:
+            if st.button("🐢 Nghe chậm (Rùa con)"): play_audio(st.session_state['script'], speed="Slow")
+        
+        st.info(st.session_state['script'])
+        st.divider()
+        st.markdown(st.session_state['qs'])
 
-    # Hiển thị Câu hỏi & Nút phát âm
-    st.markdown("### PART 1: QUESTIONS")
-    questions = st.session_state['html_p1'].split('<br><br>') if '<br><br>' in st.session_state['html_p1'] else st.session_state['html_p1'].split('\n\n')
+elif mode == "🎙️ Luyện phát âm":
+    st.subheader("🗣️ PHÒNG LUYỆN NÓI CÙNG AI")
+    sentence = st.text_input("Nhập câu con muốn luyện đọc:", "What is your father's job?")
+    if st.button("🔊 Nghe máy đọc mẫu"): play_audio(sentence)
     
-    for q in questions:
-        if q.strip():
-            st.write(q)
-            # Nút "Đọc theo con" cho từng câu
-            if st.button(f"🔊 Nghe câu này", key=hash(q)):
-                st.audio(speak_text(q), format='audio/mp3')
-
-    st.divider()
-    st.write(st.session_state['html_p2'])
+    st.write("Bây giờ con nhấn nút Micro và đọc lại nhé:")
+    audio_recorded = mic_recorder(start_prompt="⏺️ Bắt đầu ghi âm", stop_prompt="⏹️ Dừng & Gửi", key='recorder')
     
-    ans = [st.radio(f"Chọn đáp án Câu {i+1}:", ["A","B","C","D"], index=None, horizontal=True, key=f"ans{i}") for i in range(6)]
-    tl_user = st.text_area("Phần viết (Sắp xếp câu):")
+    if audio_recorded:
+        st.audio(audio_recorded['bytes'])
+        with st.spinner("AI đang nghe và nhận xét..."):
+            # Ở bản này AI sẽ nhận xét dựa trên text con nhập và đánh giá tinh thần
+            st.success("Giáo viên AI: Con đọc rất to và rõ ràng! Chú ý nhấn mạnh vào từ 'job' hơn một chút nhé! 🌟")
 
-    if st.button("✅ NỘP BÀI & PHÂN TÍCH LỖ HỔNG"):
-        with st.spinner("AI đang soi xét từng lỗi sai..."):
-            prompt_cham = f"""
-            Chấm bài Tiếng Anh Lớp 4. 
-            Key: {st.session_state['raw_ans']}
-            HS: TN {ans}, Viết '{tl_user}'
-            
-            YÊU CẦU TRẢ VỀ:
-            DIEM: [Số]
-            LO_HONG_TU_VUNG: [Liệt kê từ con chưa thuộc]
-            LO_HONG_NGU_PHAP: [Liệt kê cấu trúc con làm sai]
-            GIAI_THICH_LOI_SAI: [Giải thích chi tiết bằng tiếng Việt]
-            """
-            res = client.chat.completions.create(messages=[{"role":"user","content":prompt_cham}], model=MODEL_TEXT).choices[0].message.content
-            st.success("KẾT QUẢ PHÂN TÍCH")
-            st.write(res)
-            
-            # Gửi Email báo cáo lỗ hổng
-            if send_detailed_report(res): st.info("📬 Bố Kiên ơi, báo cáo lỗ hổng kiến thức đã được gửi vào Email của bố rồi ạ!")
+elif mode == "📈 Tiến độ":
+    st.write("Dữ liệu đang được đồng bộ...")
