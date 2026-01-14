@@ -2,6 +2,7 @@ streamlit
 groq
 pandas
 Pillow
-gTTS
+edge-tts
 matplotlib
 numpy
+
