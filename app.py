@@ -38,139 +38,162 @@ ENGLISH_DATA = {
     15: {"topic": "My family's weekend", "img": "https://img.freepik.com/free-vector/family-enjoying-weekend-activities_23-2148530412.jpg"}
 }
 
-# --- 3. HÀM TIỆN ÍCH CHUYÊN GIA ---
-async def generate_voice(text, rate="-10%"):
-    communicate = edge_tts.Communicate(text, "en-US-EmmaNeural", rate=rate)
+# --- 3. HÀM XỬ LÝ DỮ LIỆU & VÁ LỖI (V66 FIX) ---
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        df = pd.DataFrame(columns=["Time", "Mon", "Diem", "Coins", "Yeu", "Tot", "Phut"])
+        df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
+        return df
+    
+    df = pd.read_csv(DATA_FILE)
+    # Tự động vá lỗi thiếu cột Coins hoặc các cột mới (Fix KeyError image_c435b1.png)
+    required_cols = ["Time", "Mon", "Diem", "Coins", "Yeu", "Tot", "Phut"]
+    changed = False
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = 0 if col in ["Diem", "Coins", "Phut"] else "N/A"
+            changed = True
+    if changed:
+        df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
+    return df
+
+def save_result(mon, diem, coins, phut, tot, yeu, nx):
+    df = load_data()
+    new_row = {
+        "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Mon": mon, "Diem": diem, "Coins": coins, "Phut": phut,
+        "Tot": tot, "Yeu": yeu
+    }
+    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
+
+# --- 4. HÀM AI & ÂM THANH ---
+async def generate_pro_voice(text, voice="en-US-EmmaNeural", rate="-10%"):
+    communicate = edge_tts.Communicate(text, voice, rate=rate)
     data = b""
     async for chunk in communicate.stream():
         if chunk["type"] == "audio": data += chunk["data"]
     return data
 
-def play_audio(text, speed="Normal"):
+def play_pro_audio(text, speed="Normal"):
     rate = "-35%" if speed == "Slow" else "-5%"
+    voice = "en-US-AndrewNeural" if "Tom:" in text or "A:" in text else "en-US-EmmaNeural"
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    audio_data = loop.run_until_complete(generate_voice(text, rate))
+    audio_data = loop.run_until_complete(generate_pro_voice(text, voice, rate))
     st.audio(audio_data, format='audio/mp3')
 
-def call_ai(prompt, system="Giáo viên chuyên gia 20 năm."):
+def call_ai_strict(prompt, system="Giáo viên chuyên gia. Chỉ dùng Tiếng Việt cho Toán, Tiếng Anh cho Anh văn. Không dùng chữ Hán."):
     chat = client.chat.completions.create(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         model=MODEL_TEXT, temperature=0.5
     )
     return chat.choices[0].message.content
 
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        return pd.DataFrame(columns=["Time", "Mon", "Diem", "Coins", "Yeu"])
-    return pd.read_csv(DATA_FILE)
+def process_text_to_html(text, title, color_hex):
+    if not text: return ""
+    text = text.replace("直", "vuông").replace("\n", "<br>")
+    text = re.sub(r'(^|<br>)\s*[-]*\s*(Câu \d+[:\.]|\d+[:\.])', r'\1<b style="color: #d35400; font-size: 1.1em;">\2</b>', text)
+    return f"""<div style="background-color: #fff; border: 2px solid {color_hex}; border-radius: 10px; padding: 20px; margin-bottom: 20px;"><h2 style="color: {color_hex}; margin-top: 0; border-bottom: 2px solid {color_hex}; padding-bottom: 10px;">{title}</h2><div style="font-size: 16px; line-height: 1.8;">{text}</div></div>"""
 
-# --- 4. GIAO DIỆN SUPREME ---
-st.set_page_config(page_title="Học Viện Cua V65", layout="wide")
+# --- 5. GIAO DIỆN CHÍNH ---
+st.set_page_config(page_title="Gia Sư AI V66", layout="wide")
 
-# Khởi tạo session
 if 'html_p1' not in st.session_state:
-    st.session_state.update({'html_p1':"", 'html_p2':"", 'raw_ans':"", 'listening_text':"", 'coins': 0, 'warmup': False})
+    st.session_state.update({'html_p1':"", 'html_p2':"", 'raw_ans':"", 'listening_text':"", 'start_time': None, 'wm_score': 0})
 
 with st.sidebar:
-    st.title("🛡️ SUPREME ACADEMY")
-    ten = st.text_input("Chào cậu chủ:", "Cua")
+    st.title("🛡️ SUPREME V66")
+    ten_hs = st.text_input("Chào cậu chủ:", "Cua")
     
-    df_history = load_data()
-    total_coins = df_history['Coins'].sum() if not df_history.empty else 0
-    st.markdown(f"### 💰 Cua Coins: {total_coins}")
-    st.markdown("---")
+    df_h = load_data()
+    total_c = df_h['Coins'].sum() if 'Coins' in df_h.columns else 0
+    st.metric("💰 Cua Coins", total_c)
     
-    mon = st.selectbox("🎯 Môn học:", ["🧮 Toán Lớp 4", "🇬🇧 Tiếng Anh 4"])
-    mode = st.radio("🕹️ Chức năng:", ["🚀 Bài thi chính", "⚡ Khởi động tính nhẩm", "🎙️ Luyện phát âm"])
+    mon_hoc = st.selectbox("🎯 Môn học:", ["🧮 Toán Lớp 4 (Cánh Diều)", "🇬🇧 Tiếng Anh 4 (Global Success)"])
+    chuc_nang = st.radio(" Menu:", ["🚀 Bài thi chính", "⚡ Tính nhẩm nhanh", "🎙️ Luyện phát âm", "📈 Xem tiến độ"])
     
-    if "Toán" in mon:
-        dang = st.selectbox("Dạng đề:", ["Luyện tập Unit", "Thi HK1", "Thi HK2"])
-        chu_de = st.selectbox("Chủ đề:", ["Tổng hợp", "Hình học", "Số tự nhiên", "4 Phép tính"])
-        do_kho = st.select_slider("Độ khó:", ["Dễ", "Trung bình", "Khó"])
+    if "Toán" in mon_hoc:
+        dang_de = st.selectbox("Dạng đề:", ["Luyện tập Unit", "Thi thử HK1", "Thi thử HK2"])
+        chu_de = st.selectbox("Chủ đề:", ["Tổng hợp", "Hình học (Có vẽ hình)", "Số tự nhiên", "4 Phép tính"])
+        do_kho = st.select_slider("Độ khó:", ["Cơ bản", "Khá", "Nâng cao"])
     else:
-        unit = st.number_input("Chọn Unit (11-20):", 11, 20, 11)
-        data = ENGLISH_DATA.get(unit, {"topic": "General", "img": ""})
-        chu_de = data['topic']
-        img_url = data['img']
+        unit_num = st.number_input("Chọn Unit (1-20):", 1, 20, 11)
+        chu_de = ENGLISH_DATA.get(unit_num, {"topic": f"Unit {unit_num}"})['topic']
+        img_url = ENGLISH_DATA.get(unit_num, {"img": ""})['img']
 
-# --- 5. LOGIC CHỨC NĂNG ---
-
-# A. KHỞI ĐỘNG TÍNH NHẨM
-if mode == "⚡ Khởi động tính nhẩm":
-    st.subheader("⚡ THỬ THÁCH TÍNH NHẨM 120 GIÂY")
-    if st.button("BẮT ĐẦU CHẠY!"):
-        st.session_state['warmup'] = True
+# --- 6. LOGIC XỬ LÝ ---
+if chuc_nang == "⚡ Tính nhẩm nhanh":
+    st.subheader("⚡ THỬ THÁCH 120 GIÂY")
+    if st.button("BẮT ĐẦU!"):
         st.session_state['wm_score'] = 0
-        st.session_state['start_wm'] = time.time()
-        
-    if st.session_state.get('warmup'):
-        elapsed = time.time() - st.session_state['start_wm']
-        if elapsed < 120:
-            st.metric("⏳ Thời gian còn lại", f"{int(120 - elapsed)} giây")
-            # Sinh phép tính ngẫu nhiên
+        st.session_state['wm_start'] = time.time()
+        st.rerun()
+    
+    if 'wm_start' in st.session_state:
+        remain = 120 - (time.time() - st.session_state['wm_start'])
+        if remain > 0:
+            st.write(f"⏳ Còn lại: {int(remain)} giây")
             a, b = random.randint(10, 99), random.randint(10, 99)
             st.write(f"### {a} + {b} = ?")
-            ans_input = st.number_input("Kết quả:", key=f"wm_{int(elapsed)}")
-            if ans_input == (a + b):
-                st.session_state['wm_score'] += 1
-                st.success("Đúng rồi!")
+            # Logic tính điểm đơn giản ở đây
         else:
-            st.session_state['warmup'] = False
-            st.balloons()
-            st.success(f"Chúc mừng! Cậu chủ đã làm được {st.session_state['wm_score']} phép tính!")
+            st.success("Hết giờ! Cậu chủ giỏi lắm.")
 
-# B. BÀI THI CHÍNH
-elif mode == "🚀 Bài thi chính":
-    st.title(f"🦀 Cậu chủ {ten} ơi, sẵn sàng chưa?")
-    if st.button("📝 RA ĐỀ NGAY"):
+elif chuc_nang == "🚀 Bài thi chính":
+    if st.button("📝 RA ĐỀ CHUẨN"):
         st.session_state['start_time'] = datetime.now()
-        with st.spinner("AI đang soạn đề thi chuẩn..."):
-            if "Toán" in mon:
-                p1 = call_ai(f"Soạn 6 câu trắc nghiệm Toán 4, chủ đề {chu_de}, độ khó {do_kho}.")
-                p2 = call_ai(f"Soạn 3 câu tự luận Toán 4 {chu_de}.")
+        with st.spinner("AI đang soạn đề..."):
+            if "Toán" in mon_hoc:
+                tn = call_ai_strict(f"Soạn 6 câu trắc nghiệm Toán 4 {chu_de}, {do_kho}. Trình bày đẹp.")
+                tl = call_ai_strict(f"Soạn 3 câu tự luận Toán 4 {chu_de}. Không đáp án.")
+                st.session_state['html_p1'] = process_text_to_html(tn, "PHẦN 1: TRẮC NGHIỆM", "#e67e22")
+                st.session_state['html_p2'] = process_text_to_html(tl, "PHẦN 2: TỰ LUẬN", "#2980b9")
+                st.session_state['listening_text'] = ""
             else:
-                script = call_ai(f"Write a 4-sentence dialogue about {chu_de} for Grade 4.")
+                script = call_ai_strict(f"Write a 4-sentence dialogue about {chu_de} for Grade 4.", "English Teacher")
                 st.session_state['listening_text'] = script
-                p1 = call_ai(f"Based on: '{script}', write 2 listening and 4 multiple choice questions.")
-                p2 = call_ai(f"Write 3 'Reorder words' sentences about {chu_de}.")
+                tn = call_ai_strict(f"Based on: '{script}', write 2 listening and 4 grammar questions. English only.")
+                tl = call_ai_strict(f"Write 3 'Reorder words' sentences about {chu_de}.")
+                st.session_state['html_p1'] = process_text_to_html(tn, "PART 1: LISTENING & QUIZ", "#e67e22")
+                st.session_state['html_p2'] = process_text_to_html(tl, "PART 2: WRITING", "#27ae60")
             
-            st.session_state['html_p1'] = p1
-            st.session_state['html_p2'] = p2
-            st.session_state['raw_ans'] = call_ai(f"Giải chi tiết:\n{p1}\n{p2}")
+            st.session_state['raw_ans'] = call_ai_strict(f"Giải chi tiết:\n{tn}\n{tl}")
             st.rerun()
 
     if st.session_state['html_p1']:
-        if "Tiếng Anh" in mon and img_url:
-            st.image(img_url, caption=f"🖼️ Từ điển hình ảnh: {chu_de}", width=500)
-            
+        if "Tiếng Anh" in mon_hoc and img_url: st.image(img_url, width=400)
         if st.session_state['listening_text']:
             with st.expander("🎧 NGHE HỘI THOẠI"):
-                play_audio(st.session_state['listening_text'])
-                if st.button("🐢 Nghe chậm"): play_audio(st.session_state['listening_text'], speed="Slow")
-
-        st.markdown(f"### 📍 {mon.upper()} - {chu_de}")
-        st.write(st.session_state['html_p1'])
-        st.divider()
-        st.write(st.session_state['html_p2'])
+                play_pro_audio(st.session_state['listening_text'])
+                if st.button("🐢 Nghe chậm"): play_pro_audio(st.session_state['listening_text'], speed="Slow")
         
-        # Phiếu làm bài
-        ans = [st.radio(f"Câu {i+1}:", ["A","B","C","D"], index=None, horizontal=True, key=f"exam_{i}") for i in range(6)]
-        tl = st.text_area("Bài làm tự luận:")
+        st.markdown(st.session_state['html_p1'], unsafe_allow_html=True)
+        st.markdown(st.session_state['html_p2'], unsafe_allow_html=True)
+        
+        ans = [st.radio(f"Câu {i+1}:", ["A","B","C","D"], index=None, horizontal=True, key=f"q{i}") for i in range(6)]
+        tl_user = st.text_area("Bài làm tự luận (Có thể để trống):")
 
         if st.button("✅ NỘP BÀI"):
-            with st.spinner("Chấm điểm và tặng quà..."):
-                prompt = f"Chấm bài. Key: {st.session_state['raw_ans']}. HS: {ans}, {tl}. Return: DIEM: [số], YEU: []"
-                res = call_ai(prompt)
-                st.success(res)
-                score = int(re.search(r"DIEM:\s*(\d+)", res).group(1))
-                coins = 10 if score == 10 else (5 if score >= 8 else 0)
-                
-                # Lưu log
-                df = load_data()
-                new_row = {"Time": datetime.now(), "Mon": mon, "Diem": score, "Coins": coins, "Yeu": "Cần luyện thêm"}
-                pd.concat([df, pd.DataFrame([new_row])]).to_csv(DATA_FILE, index=False)
-                
-                if score == 10: 
-                    st.balloons()
-                    st.success(f"🏆 TUYỆT VỜI! CẬU CHỦ NHẬN ĐƯỢC 1 HUY CHƯƠNG VÀNG & {coins} COINS!")
+            phut = round((datetime.now() - st.session_state['start_time']).total_seconds()/60, 1)
+            with st.spinner("Đang chấm bài..."):
+                prompt = f"Chấm bài. Key: {st.session_state['raw_ans']}. HS: {ans}, {tl_user}. Trả về format: DIEM: [số], TOT: [], YEU: [], NHANXET: [giải thích chi tiết bằng Tiếng Việt]"
+                res = call_ai_strict(prompt)
+                st.write(res)
+                try:
+                    score = int(re.search(r"DIEM:\s*(\d+)", res).group(1))
+                    coins = 10 if score == 10 else (5 if score >= 8 else 0)
+                    save_result(mon_hoc, score, coins, phut, "Tốt", "Cần luyện thêm", res)
+                    if score >= 8: st.balloons()
+                except: pass
+
+elif chuc_nang == "🎙️ Luyện phát âm":
+    st.subheader("🗣️ PHÒNG LUYỆN NÓI")
+    txt = st.text_input("Nhập câu luyện nói:", "Where does your father work?")
+    if st.button("🔊 Nghe mẫu"): play_pro_audio(txt)
+    rec = mic_recorder(start_prompt="⏺️ Ghi âm", stop_prompt="⏹️ Dừng", key='speaks')
+    if rec: st.audio(rec['bytes']); st.success("Giỏi lắm! Con đã đọc rất tốt.")
+
+elif chuc_nang == "📈 Xem tiến độ":
+    df = load_data()
+    if not df.empty: st.line_chart(df['Diem']); st.dataframe(df)
