@@ -67,17 +67,17 @@ def play_pro_audio(text, speed="Normal"):
     audio_data = loop.run_until_complete(generate_pro_voice(text, rate=rate))
     st.audio(audio_data, format='audio/mp3')
 
-def call_ai_strict(prompt, system="Giáo viên chuyên gia."):
+def call_ai_strict(prompt, system="Giáo viên chuyên gia 20 năm."):
     chat = client.chat.completions.create(messages=[{"role":"system","content":system},{"role":"user","content":prompt}], model=MODEL_TEXT, temperature=0.5)
     return chat.choices[0].message.content
 
 # --- 5. GIAO DIỆN CHÍNH ---
-st.set_page_config(page_title="Gia Sư AI V73", layout="wide")
+st.set_page_config(page_title="Gia Sư AI V74", layout="wide")
 if 'html_p1' not in st.session_state:
     st.session_state.update({'html_p1':"", 'html_p2':"", 'raw_ans':"", 'ket_qua':"", 'start_time': None, 'listening_text': ""})
 
 with st.sidebar:
-    st.title("🛡️ SUPREME V73")
+    st.title("🛡️ SUPREME V74")
     ten_hs = st.text_input("Học sinh:", "Cua")
     df_h = load_data(); st.metric("💰 Cua Coins", df_h['Coins'].sum())
     mon_hoc = st.selectbox("🎯 Môn học:", ["🧮 Toán 4", "🇬🇧 Tiếng Anh 4"])
@@ -94,7 +94,6 @@ with st.sidebar:
 if mode == "🚀 Làm bài mới":
     st.title(f"🦀 Chào cậu chủ {ten_hs}!")
     
-    # Nút ra đề luôn xóa kết quả cũ
     if st.button("📝 RA ĐỀ MỚI"):
         st.session_state.update({'html_p1':"", 'html_p2':"", 'ket_qua':"", 'start_time': datetime.now()})
         with st.spinner("AI đang soạn đề..."):
@@ -120,21 +119,41 @@ if mode == "🚀 Làm bài mới":
         st.markdown(st.session_state['html_p1'], unsafe_allow_html=True)
         st.markdown(st.session_state['html_p2'], unsafe_allow_html=True)
         
-        # SỬ DỤNG FORM ĐỂ ỔN ĐỊNH VIỆC NỘP BÀI
         with st.form("exam_form"):
             st.subheader("✍️ PHIẾU LÀM BÀI")
             ans = [st.radio(f"Câu {i+1}:", ["A","B","C","D"], index=None, horizontal=True, key=f"q{i}") for i in range(6)]
-            tl_user = st.text_area("Lời giải tự luận:")
-            submit = st.form_submit_button("✅ NỘP BÀI & CHẤM ĐIỂM")
+            tl_user = st.text_area("Lời giải tự luận (Nếu để trống sẽ bị 0 điểm phần này):")
+            submit = st.form_submit_button("✅ NỘP BÀI & CHẤM ĐIỂM NGHIÊM KHẮC")
 
             if submit:
-                with st.spinner("Đang chấm bài..."):
-                    prompt = f"Chấm bài. Key: {st.session_state['raw_ans']}. HS: {ans}, {tl_user}."
-                    res = call_ai_strict(prompt, "Giáo viên chấm thi tận tâm.")
-                    st.session_state['ket_qua'] = res # Lưu kết quả vào session
+                with st.spinner("Đang chấm bài theo kỷ luật thép..."):
+                    # XỬ LÝ LỖI GIẤY TRẮNG (V74)
+                    tu_luan_status = "HÀNH VI: HỌC SINH ĐỂ TRỐNG PHẦN TỰ LUẬN. KHÔNG ĐƯỢC CHẤM ĐIỂM CHO PHẦN NÀY, KHÔNG ĐƯỢC COI LÀ ĐÚNG." if not tl_user.strip() else f"HS LÀM: '{tl_user}'"
                     
-        # Hiển thị kết quả bên ngoài form để không bị mất khi rerun
+                    prompt_strict = f"""
+                    Bạn là giáo viên chấm thi cực kỳ công tâm và nghiêm khắc.
+                    THANG ĐIỂM BẮT BUỘC: 10 ĐIỂM.
+                    - Đáp án chuẩn: {st.session_state['raw_ans']}
+                    - Bài làm của HS: Trắc nghiệm {ans}, {tu_luan_status}.
+                    
+                    YÊU CẦU TRẢ VỀ THEO CẤU TRÚC:
+                    1. DIEM: [Số điểm từ 0-10]
+                    2. NHẬN XÉT: Phân tích kỹ con sai ở đâu. Nếu con để trống phần nào, hãy nhắc nhở nghiêm khắc.
+                    3. HƯỚNG DẪN GIẢI: Đưa ra đáp án đúng và giải thích cặn kẽ bằng Tiếng Việt.
+                    4. YEU: [Tóm tắt 1 câu vùng kiến thức con còn yếu]
+                    """
+                    res = call_ai_strict(prompt_strict, "Giáo viên chấm thi nghiêm khắc.")
+                    st.session_state['ket_qua'] = res
+                    
+                    # Lưu log (V74)
+                    try:
+                        score_val = int(re.search(r"DIEM:\s*(\d+)", res).group(1))
+                        df = load_data()
+                        new_row = {"Time": datetime.now(), "Mon": mon_hoc, "Diem": score_val, "Coins": (10 if score_val==10 else 0), "Yeu": "Cần cố gắng", "Phut": 0}
+                        pd.concat([df, pd.DataFrame([new_row])]).to_csv(DATA_FILE, index=False)
+                    except: pass
+                    
         if st.session_state['ket_qua']:
             st.divider()
             st.markdown(process_text_to_html(st.session_state['ket_qua'], "📊 KẾT QUẢ VÀ GIẢI THÍCH CHI TIẾT", "#16a085"), unsafe_allow_html=True)
-            if "10" in st.session_state['ket_qua']: st.balloons()
+            if "DIEM: 10" in st.session_state['ket_qua']: st.balloons()
