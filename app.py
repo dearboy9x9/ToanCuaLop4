@@ -72,12 +72,12 @@ def call_ai_strict(prompt, system="Giáo viên chuyên gia 20 năm."):
     return chat.choices[0].message.content
 
 # --- 5. GIAO DIỆN CHÍNH ---
-st.set_page_config(page_title="Gia Sư AI V74", layout="wide")
+st.set_page_config(page_title="Gia Sư AI V75", layout="wide")
 if 'html_p1' not in st.session_state:
     st.session_state.update({'html_p1':"", 'html_p2':"", 'raw_ans':"", 'ket_qua':"", 'start_time': None, 'listening_text': ""})
 
 with st.sidebar:
-    st.title("🛡️ SUPREME V74")
+    st.title("🛡️ SUPREME V75")
     ten_hs = st.text_input("Học sinh:", "Cua")
     df_h = load_data(); st.metric("💰 Cua Coins", df_h['Coins'].sum())
     mon_hoc = st.selectbox("🎯 Môn học:", ["🧮 Toán 4", "🇬🇧 Tiếng Anh 4"])
@@ -98,8 +98,10 @@ if mode == "🚀 Làm bài mới":
         st.session_state.update({'html_p1':"", 'html_p2':"", 'ket_qua':"", 'start_time': datetime.now()})
         with st.spinner("AI đang soạn đề..."):
             if "Toán" in mon_hoc:
-                p1 = call_ai_strict(f"Soạn 6 câu trắc nghiệm Toán 4 {chu_de}, {do_kho}. NO ANSWERS.")
-                p2 = call_ai_strict(f"Soạn 3 câu tự luận Toán 4 {chu_de}. NO ANSWERS.")
+                prompt_tn = f"Soạn 6 câu trắc nghiệm Toán 4 {chu_de}, {do_kho}. TUYỆT ĐỐI KHÔNG ghi đáp án đúng."
+                prompt_tl = f"Soạn 3 câu tự luận Toán 4 {chu_de}. TUYỆT ĐỐI KHÔNG ghi lời giải."
+                p1 = call_ai_strict(prompt_tn, "Giáo viên Toán VN. Chỉ soạn đề.")
+                p2 = call_ai_strict(prompt_tl, "Giáo viên Toán VN. Chỉ soạn đề.")
                 st.session_state['html_p1'] = process_text_to_html(p1, "PHẦN 1: TRẮC NGHIỆM", "#e67e22")
                 st.session_state['html_p2'] = process_text_to_html(p2, "PHẦN 2: TỰ LUẬN", "#2c3e50")
             else:
@@ -123,29 +125,32 @@ if mode == "🚀 Làm bài mới":
             st.subheader("✍️ PHIẾU LÀM BÀI")
             ans = [st.radio(f"Câu {i+1}:", ["A","B","C","D"], index=None, horizontal=True, key=f"q{i}") for i in range(6)]
             tl_user = st.text_area("Lời giải tự luận (Nếu để trống sẽ bị 0 điểm phần này):")
-            submit = st.form_submit_button("✅ NỘP BÀI & CHẤM ĐIỂM NGHIÊM KHẮC")
+            submit = st.form_submit_button("✅ NỘP BÀI & CHẤM CHI TIẾT TỪNG CÂU")
 
             if submit:
-                with st.spinner("Đang chấm bài theo kỷ luật thép..."):
-                    # XỬ LÝ LỖI GIẤY TRẮNG (V74)
-                    tu_luan_status = "HÀNH VI: HỌC SINH ĐỂ TRỐNG PHẦN TỰ LUẬN. KHÔNG ĐƯỢC CHẤM ĐIỂM CHO PHẦN NÀY, KHÔNG ĐƯỢC COI LÀ ĐÚNG." if not tl_user.strip() else f"HS LÀM: '{tl_user}'"
+                with st.spinner("AI đang soi xét từng câu trả lời..."):
+                    tu_luan_status = "HỌC SINH ĐỂ TRỐNG PHẦN TỰ LUẬN (0 ĐIỂM)" if not tl_user.strip() else f"HS LÀM: '{tl_user}'"
                     
-                    prompt_strict = f"""
-                    Bạn là giáo viên chấm thi cực kỳ công tâm và nghiêm khắc.
-                    THANG ĐIỂM BẮT BUỘC: 10 ĐIỂM.
+                    # CẬP NHẬT PROMPT CHẤM CHI TIẾT TỪNG CÂU (V75)
+                    prompt_micro = f"""
+                    Bạn là giáo viên chấm thi cực kỳ nghiêm khắc. 
+                    NHIỆM VỤ: Chấm điểm thang 10 và NHẬN XÉT CHI TIẾT TỪNG CÂU MỘT.
+                    
                     - Đáp án chuẩn: {st.session_state['raw_ans']}
                     - Bài làm của HS: Trắc nghiệm {ans}, {tu_luan_status}.
                     
                     YÊU CẦU TRẢ VỀ THEO CẤU TRÚC:
-                    1. DIEM: [Số điểm từ 0-10]
-                    2. NHẬN XÉT: Phân tích kỹ con sai ở đâu. Nếu con để trống phần nào, hãy nhắc nhở nghiêm khắc.
-                    3. HƯỚNG DẪN GIẢI: Đưa ra đáp án đúng và giải thích cặn kẽ bằng Tiếng Việt.
-                    4. YEU: [Tóm tắt 1 câu vùng kiến thức con còn yếu]
+                    1. KẾT QUẢ CHI TIẾT TỪNG CÂU:
+                       - Câu 1: [Đúng/Sai] - [Giải thích tại sao đúng hoặc chỉ ra lỗi sai].
+                       - ... (Làm tương tự cho đến Câu 9).
+                       - Với phần tự luận (Câu 7-9), nếu HS để trống, ghi rõ "Bỏ trống - 0 điểm".
+                    2. DIEM: [Số điểm tổng thang 10]
+                    3. NHẬN XÉT TỔNG QUÁT: Nhận xét thái độ và kỹ năng.
+                    4. YEU: [Tóm tắt vùng kiến thức yếu]
                     """
-                    res = call_ai_strict(prompt_strict, "Giáo viên chấm thi nghiêm khắc.")
+                    res = call_ai_strict(prompt_micro, "Chuyên gia chấm thi vi mô.")
                     st.session_state['ket_qua'] = res
                     
-                    # Lưu log (V74)
                     try:
                         score_val = int(re.search(r"DIEM:\s*(\d+)", res).group(1))
                         df = load_data()
@@ -155,5 +160,5 @@ if mode == "🚀 Làm bài mới":
                     
         if st.session_state['ket_qua']:
             st.divider()
-            st.markdown(process_text_to_html(st.session_state['ket_qua'], "📊 KẾT QUẢ VÀ GIẢI THÍCH CHI TIẾT", "#16a085"), unsafe_allow_html=True)
+            st.markdown(process_text_to_html(st.session_state['ket_qua'], "📊 KẾT QUẢ PHÂN TÍCH VI MÔ", "#16a085"), unsafe_allow_html=True)
             if "DIEM: 10" in st.session_state['ket_qua']: st.balloons()
